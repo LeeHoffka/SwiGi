@@ -484,8 +484,23 @@ def main():
     signal.signal(signal.SIGINT, on_sigint)
 
     total_switches = 0
+    last_response = time.time()  # watchdog: last time we got any HID++ response
+    WATCHDOG_TIMEOUT = 10.0      # force reconnect after this many seconds without response
 
     while running:
+        # ── Watchdog: force reconnect if no response for too long ──
+        if time.time() - last_response > WATCHDOG_TIMEOUT:
+            log.info("Watchdog: žádná odpověď %ds, reconnect...", int(WATCHDOG_TIMEOUT))
+            kb.close()
+            mouse.close()
+            time.sleep(1.0)
+            kb_new = find_device(DEVICE_TYPE_KEYBOARD)
+            if kb_new:
+                kb = kb_new
+                log.info("Watchdog reconnect: %s", kb.name)
+            last_response = time.time()  # reset timer regardless
+            continue
+
         # ── Send ping ──
         try:
             kb.transport.write(_PING_MSG)
@@ -511,6 +526,7 @@ def main():
                 continue
             kb = kb_new
             log.info("Klávesnice reconnect: %s", kb.name)
+            last_response = time.time()  # reset watchdog
 
             # Just close stale mouse transport — don't probe/reconnect now
             # (aggressive HID open/close can disrupt BT stack while mouse is reconnecting)
@@ -538,6 +554,7 @@ def main():
             feat = raw[2]
             func = raw[3]
             sw_id = func & 0x0F
+            last_response = time.time()  # watchdog: got valid response
 
             # CHANGE_HOST notification: feat matches, sw_id == 0 (notification)
             if feat == kb.change_host_idx and sw_id == 0 and len(raw) > 5:
