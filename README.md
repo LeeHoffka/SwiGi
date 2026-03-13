@@ -18,6 +18,11 @@ Press Easy-Switch on keyboard → mouse automatically switches to the same host.
 
 > *Made for people. Enjoy it and stop being a slave to buttons.* ✌️
 
+<p align="center">
+  <i>Ušetřilo ti to čas a nervy? / Did it save you time and frustration?</i><br><br>
+  <a href="https://github.com/sponsors/LeeHoffka" target="_blank"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?style=for-the-badge&logo=github" alt="Sponsor on GitHub" height="40"></a>
+</p>
+
 ---
 
 ## 🇨🇿 Česky
@@ -284,7 +289,7 @@ Pokud ti SwiGi ušetří čas a nervy:
 
 If SwiGi saves you time and frustration:
 
-<a href="https://www.buymeacoffee.com/TVUJ_UCET" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50"></a>
+<a href="https://github.com/sponsors/LeeHoffka" target="_blank"><img src="https://img.shields.io/badge/Sponsor-%E2%9D%A4-pink?style=for-the-badge&logo=github" alt="Sponsor on GitHub" height="40"></a>
 
 ---
 
