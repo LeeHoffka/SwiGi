@@ -56,7 +56,7 @@ DEVICE_TYPE_TRACKPAD = 4
 DEVICE_TYPE_TRACKBALL = 5
 
 DEVNUMBER_DIRECT = 0xFF
-SW_ID = 0x08
+SW_ID = 0x0A  # SwiGi identifier (CleverSwitch uses 0x08)
 CHANGE_HOST_FN_SET = 0x10
 
 _MSG_LENGTHS = {REPORT_SHORT: MSG_SHORT_LEN, REPORT_LONG: MSG_LONG_LEN}
@@ -528,18 +528,17 @@ def main():
             log.info("Klávesnice reconnect: %s", kb.name)
             last_response = time.time()  # reset watchdog
 
-            # Just close stale mouse transport — don't probe/reconnect now
-            # (aggressive HID open/close can disrupt BT stack while mouse is reconnecting)
+            # Just close stale mouse transport — reconnect at next event
             mouse.close()
             log.debug("Starý mouse transport zavřen, reconnect při dalším eventu")
 
             continue
 
         # ── Read responses (200ms window) ──
-        deadline = time.time() + 0.2
+        deadline = time.time() + 0.08
         while time.time() < deadline and running:
             try:
-                raw = kb.transport.read(timeout=50)
+                raw = kb.transport.read(timeout=25)
             except (TransportError, OSError):
                 break
 
@@ -601,7 +600,7 @@ def main():
             if sw_id == 0:
                 log.debug("Notifikace: feat=0x%02X [%s]", feat, raw[:10].hex())
 
-        time.sleep(0.05)
+        time.sleep(0.02)
 
     log.info("Ukončuji. Celkem %d přepnutí.", total_switches)
     kb.close()
