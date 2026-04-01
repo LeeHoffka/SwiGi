@@ -20,6 +20,8 @@ import argparse
 import ctypes
 import ctypes.util
 import dataclasses
+import gettext
+import locale
 import logging
 import os
 import platform
@@ -27,6 +29,23 @@ import signal
 import struct
 import sys
 import time
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  i18n — Czech is the built-in default; other locales loaded from ./locale/
+# ═══════════════════════════════════════════════════════════════════════════════
+
+def _setup_i18n() -> gettext.NullTranslations:
+    _locale_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "locale")
+    lang = locale.getdefaultlocale()[0] or ""
+    # Czech (cs, cs_CZ, …) → identity translation (strings are already Czech)
+    if lang.startswith("cs"):
+        return gettext.NullTranslations()
+    try:
+        return gettext.translation("swigi", localedir=_locale_dir, languages=[lang])
+    except FileNotFoundError:
+        return gettext.NullTranslations()  # fallback: Czech (identity)
+
+_ = _setup_i18n().gettext
 
 log = logging.getLogger("swigi")
 
@@ -141,11 +160,11 @@ def _load_hidapi() -> ctypes.CDLL:
             continue
 
     hints = {
-        "Darwin": "brew install hidapi  NEBO  zkopíruj libhidapi.dylib do složky s tímto souborem",
-        "Windows": "Stáhni hidapi.dll z github.com/libusb/hidapi/releases a dej do složky s tímto souborem",
+        "Darwin": _("brew install hidapi  NEBO  zkopíruj libhidapi.dylib do složky s tímto souborem"),
+        "Windows": _("Stáhni hidapi.dll z github.com/libusb/hidapi/releases a dej do složky s tímto souborem"),
         "Linux": "sudo apt install libhidapi-hidraw0",
     }
-    raise ImportError(f"hidapi nenalezena — {hints.get(_SYSTEM, 'nainstaluj hidapi')}")
+    raise ImportError(_("hidapi nenalezena — {hint}").format(hint=hints.get(_SYSTEM, _("nainstaluj hidapi"))))
 
 
 _lib = _load_hidapi()
@@ -446,8 +465,8 @@ _PING_MSG = struct.pack("!BB18s", REPORT_LONG, DEVNUMBER_DIRECT,
 
 def main():
     parser = argparse.ArgumentParser(
-        description="SwiGi — synchronizace Easy-Switch přes Bluetooth")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Podrobné logování")
+        description=_("SwiGi — synchronizace Easy-Switch přes Bluetooth"))
+    parser.add_argument("-v", "--verbose", action="store_true", help=_("Podrobné logování"))
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -456,24 +475,24 @@ def main():
         datefmt="%H:%M:%S",
     )
 
-    log.info("SwiGi — hledám zařízení...")
+    log.info(_("SwiGi — hledám zařízení..."))
 
     kb = find_device(DEVICE_TYPE_KEYBOARD)
     if kb is None:
-        log.error("Klávesnice nenalezena! Zkontroluj BT připojení.")
+        log.error(_("Klávesnice nenalezena! Zkontroluj BT připojení."))
         return 1
-    log.info("Klávesnice: %s (CHANGE_HOST idx=%d)", kb.name, kb.change_host_idx)
+    log.info(_("Klávesnice: %s (CHANGE_HOST idx=%d)"), kb.name, kb.change_host_idx)
 
     mouse = find_device(DEVICE_TYPE_MOUSE)
     if mouse is None:
-        log.error("Myš nenalezena! Zkontroluj BT připojení.")
+        log.error(_("Myš nenalezena! Zkontroluj BT připojení."))
         kb.close()
         return 1
-    log.info("Myš:        %s (CHANGE_HOST idx=%d)", mouse.name, mouse.change_host_idx)
+    log.info(_("Myš:        %s (CHANGE_HOST idx=%d)"), mouse.name, mouse.change_host_idx)
 
     log.info("")
-    log.info("Připraveno. Stiskni Easy-Switch na %s.", kb.name)
-    log.info("Ctrl+C pro ukončení.")
+    log.info(_("Připraveno. Stiskni Easy-Switch na %s."), kb.name)
+    log.info(_("Ctrl+C pro ukončení."))
 
     running = True
 
@@ -490,14 +509,14 @@ def main():
     while running:
         # ── Watchdog: force reconnect if no response for too long ──
         if time.time() - last_response > WATCHDOG_TIMEOUT:
-            log.info("Watchdog: žádná odpověď %ds, reconnect...", int(WATCHDOG_TIMEOUT))
+            log.info(_("Watchdog: žádná odpověď %ds, reconnect..."), int(WATCHDOG_TIMEOUT))
             kb.close()
             mouse.close()
             time.sleep(1.0)
             kb_new = find_device(DEVICE_TYPE_KEYBOARD)
             if kb_new:
                 kb = kb_new
-                log.info("Watchdog reconnect: %s", kb.name)
+                log.info(_("Watchdog reconnect: %s"), kb.name)
             last_response = time.time()  # reset timer regardless
             continue
 
@@ -505,7 +524,7 @@ def main():
         try:
             kb.transport.write(_PING_MSG)
         except (TransportError, OSError):
-            log.info("Klávesnice se odpojila, čekám na návrat...")
+            log.info(_("Klávesnice se odpojila, čekám na návrat..."))
             kb.close()
 
             # Reconnect loop
@@ -518,19 +537,19 @@ def main():
                 if kb_new is not None:
                     break
                 if attempt % 20 == 19:
-                    log.debug("Reconnect: pokus %d/120...", attempt + 1)
+                    log.debug(_("Reconnect: pokus %d/120..."), attempt + 1)
 
             if kb_new is None:
                 if running:
-                    log.warning("Klávesnice se nevrátila, zkouším dál...")
+                    log.warning(_("Klávesnice se nevrátila, zkouším dál..."))
                 continue
             kb = kb_new
-            log.info("Klávesnice reconnect: %s", kb.name)
+            log.info(_("Klávesnice reconnect: %s"), kb.name)
             last_response = time.time()  # reset watchdog
 
             # Just close stale mouse transport — reconnect at next event
             mouse.close()
-            log.debug("Starý mouse transport zavřen, reconnect při dalším eventu")
+            log.debug(_("Starý mouse transport zavřen, reconnect při dalším eventu"))
 
             continue
 
@@ -559,7 +578,7 @@ def main():
             if feat == kb.change_host_idx and sw_id == 0 and len(raw) > 5:
                 target_host = raw[5]
                 log.info("")
-                log.info("★ Easy-Switch: %s → host %d", kb.name, target_host)
+                log.info(_("★ Easy-Switch: %s → host %d"), kb.name, target_host)
 
                 # Send CHANGE_HOST to mouse — reconnect if transport is stale
                 if mouse.transport._dev is None:
@@ -568,16 +587,16 @@ def main():
                     if new_mouse:
                         mouse = new_mouse
                     else:
-                        log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
+                        log.info(_("Myš zatím nedostupná — přepne se při dalším Easy-Switch"))
                         break
 
                 try:
                     send_change_host(mouse.transport, DEVNUMBER_DIRECT,
                                      mouse.change_host_idx, target_host)
-                    log.info("★ CHANGE_HOST → %s → host %d", mouse.name, target_host)
+                    log.info(_("★ CHANGE_HOST → %s → host %d"), mouse.name, target_host)
                     total_switches += 1
                 except (TransportError, OSError):
-                    log.warning("CHANGE_HOST na myš selhal, zkouším reconnect myši...")
+                    log.warning(_("CHANGE_HOST na myš selhal, zkouším reconnect myši..."))
                     mouse.close()
                     time.sleep(1.0)  # let BT stack settle
                     new_mouse = find_device(DEVICE_TYPE_MOUSE)
@@ -586,13 +605,13 @@ def main():
                         try:
                             send_change_host(mouse.transport, DEVNUMBER_DIRECT,
                                              mouse.change_host_idx, target_host)
-                            log.info("★ CHANGE_HOST → %s → host %d (po reconnectu)",
+                            log.info(_("★ CHANGE_HOST → %s → host %d (po reconnectu)"),
                                      mouse.name, target_host)
                             total_switches += 1
                         except (TransportError, OSError) as e:
-                            log.warning("CHANGE_HOST retry selhal: %s — myš se přepne příště", e)
+                            log.warning(_("CHANGE_HOST retry selhal: %s — myš se přepne příště"), e)
                     else:
-                        log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
+                        log.info(_("Myš zatím nedostupná — přepne se při dalším Easy-Switch"))
 
                 break  # keyboard will disconnect
 
@@ -602,7 +621,7 @@ def main():
 
         time.sleep(0.02)
 
-    log.info("Ukončuji. Celkem %d přepnutí.", total_switches)
+    log.info(_("Ukončuji. Celkem %d přepnutí."), total_switches)
     kb.close()
     mouse.close()
     return 0
