@@ -1,0 +1,97 @@
+# SwiGi — English translations
+# Czech is the source language (built-in default).
+# Compile with: msgfmt swigi.po -o swigi.mo
+#
+msgid ""
+msgstr ""
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Language: en\n"
+
+# _load_hidapi() hints
+msgid "brew install hidapi  NEBO  zkopíruj libhidapi.dylib do složky s tímto souborem"
+msgstr "brew install hidapi  OR  copy libhidapi.dylib next to this file"
+
+msgid "Stáhni hidapi.dll z github.com/libusb/hidapi/releases a dej do složky s tímto souborem"
+msgstr "Download hidapi.dll from github.com/libusb/hidapi/releases and place it next to this file"
+
+msgid "nainstaluj hidapi"
+msgstr "install hidapi"
+
+msgid "hidapi nenalezena — {hint}"
+msgstr "hidapi not found — {hint}"
+
+# argparse
+msgid "SwiGi — synchronizace Easy-Switch přes Bluetooth"
+msgstr "SwiGi — Easy-Switch synchronization over Bluetooth"
+
+msgid "Podrobné logování"
+msgstr "Verbose logging"
+
+# Startup
+msgid "SwiGi — hledám zařízení..."
+msgstr "SwiGi — searching for devices..."
+
+msgid "Klávesnice nenalezena! Zkontroluj BT připojení."
+msgstr "Keyboard not found! Check your Bluetooth connection."
+
+msgid "Klávesnice: %s (CHANGE_HOST idx=%d)"
+msgstr "Keyboard: %s (CHANGE_HOST idx=%d)"
+
+msgid "Myš nenalezena! Zkontroluj BT připojení."
+msgstr "Mouse not found! Check your Bluetooth connection."
+
+msgid "Myš:        %s (CHANGE_HOST idx=%d)"
+msgstr "Mouse:      %s (CHANGE_HOST idx=%d)"
+
+msgid "Připraveno. Stiskni Easy-Switch na %s."
+msgstr "Ready. Press Easy-Switch on %s."
+
+msgid "Ctrl+C pro ukončení."
+msgstr "Ctrl+C to quit."
+
+# Watchdog
+msgid "Watchdog: žádná odpověď %ds, reconnect..."
+msgstr "Watchdog: no response for %ds, reconnecting..."
+
+msgid "Watchdog reconnect: %s"
+msgstr "Watchdog reconnect: %s"
+
+# Keyboard reconnect
+msgid "Klávesnice se odpojila, čekám na návrat..."
+msgstr "Keyboard disconnected, waiting for it to return..."
+
+msgid "Reconnect: pokus %d/120..."
+msgstr "Reconnect: attempt %d/120..."
+
+msgid "Klávesnice se nevrátila, zkouším dál..."
+msgstr "Keyboard did not return, retrying..."
+
+msgid "Klávesnice reconnect: %s"
+msgstr "Keyboard reconnect: %s"
+
+msgid "Starý mouse transport zavřen, reconnect při dalším eventu"
+msgstr "Stale mouse transport closed, will reconnect on next event"
+
+# Switch events
+msgid "★ Easy-Switch: %s → host %d"
+msgstr "★ Easy-Switch: %s → host %d"
+
+msgid "Myš zatím nedostupná — přepne se při dalším Easy-Switch"
+msgstr "Mouse not yet available — will switch on next Easy-Switch press"
+
+msgid "★ CHANGE_HOST → %s → host %d"
+msgstr "★ CHANGE_HOST → %s → host %d"
+
+msgid "CHANGE_HOST na myš selhal, zkouším reconnect myši..."
+msgstr "CHANGE_HOST to mouse failed, attempting mouse reconnect..."
+
+msgid "★ CHANGE_HOST → %s → host %d (po reconnectu)"
+msgstr "★ CHANGE_HOST → %s → host %d (after reconnect)"
+
+msgid "CHANGE_HOST retry selhal: %s — myš se přepne příště"
+msgstr "CHANGE_HOST retry failed: %s — mouse will switch next time"
+
+# Shutdown
+msgid "Ukončuji. Celkem %d přepnutí."
+msgstr "Shutting down. Total switches: %d."
