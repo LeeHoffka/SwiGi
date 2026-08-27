@@ -136,12 +136,25 @@ systemctl --user enable --now swigi
 
 Uses HID++ 2.0 protocol (CHANGE_HOST feature `0x1814`). Single Python file, no external dependencies besides hidapi.
 
+**MX Keys (original):** Also listens via REPROG_CONTROLS analytics/divert notifications — not just CHANGE_HOST (MX Keys S path).
+
+### Channel hooks (optional)
+
+Run commands when switching to a specific Easy-Switch channel — e.g. change monitor input via [m1ddc](https://github.com/waydabber/m1ddc).
+
+1. Copy `config.example.json` to `~/.config/swigi/config.json`
+2. Edit `on_channel` commands for channels 1–3
+3. Restart SwiGi
+
+Hooks run asynchronously and never block mouse relay.
+
 ### Tested
 
 | Device | OS | Connection |
 |--------|-----|------------|
 | MX Keys S + MX Vertical | macOS (Sequoia) | Bluetooth |
 | MX Keys S + MX Vertical | Windows 11 | Bluetooth |
+| MX Keys + MX Master 3S | macOS (Sequoia) | Bluetooth |
 
 Should work with any Logitech device combo that supports HID++ 2.0 and CHANGE_HOST.
 

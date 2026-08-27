@@ -20,13 +20,16 @@ import argparse
 import ctypes
 import ctypes.util
 import dataclasses
+import json
 import logging
 import os
 import platform
 import signal
 import struct
+import subprocess
 import sys
 import time
+from pathlib import Path
 
 log = logging.getLogger("swigi")
 
@@ -49,6 +52,14 @@ MAX_READ_SIZE = 32
 FEATURE_ROOT = 0x0000
 FEATURE_DEVICE_TYPE_AND_NAME = 0x0005
 FEATURE_CHANGE_HOST = 0x1814
+FEATURE_REPROG_CONTROLS_V4 = 0x1B04
+
+# Easy-Switch CID → 0-based host index (MX Keys, MX Master, etc.)
+HOST_SWITCH_CIDS = {0x00D1: 0, 0x00D2: 1, 0x00D3: 2}
+KEY_FLAG_ANALYTICS = 0x04
+KEY_FLAG_DIVERTABLE = 0x20
+MAP_FLAG_DIVERTED = 0x01
+ANALYTICS_BYTE9 = 0x03
 
 DEVICE_TYPE_KEYBOARD = 0
 DEVICE_TYPE_MOUSE = 3
@@ -350,6 +361,72 @@ def get_current_host(transport, devnumber, feat_idx):
     return None
 
 
+def enable_es_key_reporting(transport, devnumber, reprog_idx) -> bool:
+    """Enable analytics or divert on Easy-Switch keys (required for MX Keys, not MX Keys S)."""
+    reply = hidpp_request(transport, devnumber, (reprog_idx << 8) | 0x00, timeout=500)
+    if not reply:
+        return False
+
+    use_analytics = False
+    use_divert = False
+    for index in range(reply[0]):
+        info = hidpp_request(transport, devnumber, (reprog_idx << 8) | 0x10, index, timeout=500)
+        if not info or len(info) < 5:
+            continue
+        cid = (info[0] << 8) | info[1]
+        if cid not in HOST_SWITCH_CIDS:
+            continue
+        flags = info[4]
+        use_analytics = bool(flags & KEY_FLAG_ANALYTICS)
+        use_divert = bool(flags & KEY_FLAG_DIVERTABLE)
+        break
+
+    if not use_analytics and not use_divert:
+        log.debug("Easy-Switch CIDs are not analytics/divertable on this keyboard")
+        return False
+
+    mode = "analytics" if use_analytics else "divert"
+    for cid in HOST_SWITCH_CIDS:
+        if use_analytics:
+            params = struct.pack("!HBHB", cid, 0x00, 0x0000, ANALYTICS_BYTE9)
+        else:
+            bfield = (MAP_FLAG_DIVERTED << 1) | MAP_FLAG_DIVERTED
+            params = struct.pack("!HBH", cid, bfield, 0)
+        request_id = (reprog_idx << 8) | 0x30 | SW_ID
+        msg = _build_msg(devnumber, request_id, params)
+        transport.write(msg)
+        log.debug("ES key reporting (%s) enabled for CID 0x%04X", mode, cid)
+
+    log.info("Easy-Switch key reporting enabled (%s, REPROG idx=%d)", mode, reprog_idx)
+    return True
+
+
+def parse_easy_switch_target(raw: bytes, kb: "DeviceInfo") -> int | None:
+    """Return 0-based target host from a keyboard notification, or None."""
+    if len(raw) < 6 or raw[0] not in _MSG_LENGTHS:
+        return None
+
+    feat = raw[2]
+    func_byte = raw[3]
+    function = (func_byte & 0xF0) >> 4
+    sw_id = func_byte & 0x0F
+    if sw_id != 0:
+        return None
+
+    # CHANGE_HOST notification (e.g. MX Keys S)
+    if feat == kb.change_host_idx and len(raw) > 5:
+        return raw[5]
+
+    # REPROG_CONTROLS CID notification (e.g. MX Keys)
+    if kb.reprog_idx and feat == kb.reprog_idx:
+        cid = (raw[4] << 8) | raw[5]
+        if cid in HOST_SWITCH_CIDS and function in (0, 2):
+            if function != 2 or (len(raw) > 6 and raw[6] == 0x01):
+                return HOST_SWITCH_CIDS[cid]
+
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 #  Device Discovery
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -361,6 +438,7 @@ class DeviceInfo:
     name: str
     pid: int
     change_host_idx: int
+    reprog_idx: int | None = None
 
     def close(self):
         try:
@@ -422,12 +500,65 @@ def find_device(device_type_wanted: int) -> DeviceInfo | None:
             if ch is None:
                 t.close()
                 continue
+            reprog = None
+            if device_type_wanted == DEVICE_TYPE_KEYBOARD:
+                reprog = resolve_feature(t, DEVNUMBER_DIRECT, FEATURE_REPROG_CONTROLS_V4)
             found_pids.add(pid)
-            return DeviceInfo(t, name, pid, ch)
+            return DeviceInfo(t, name, pid, ch, reprog)
         except (TransportError, OSError):
             t.close()
             continue
     return None
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+#  Channel hooks (monitor input, etc.)
+# ═══════════════════════════════════════════════════════════════════════════════
+
+CONFIG_PATH = Path.home() / ".config" / "swigi" / "config.json"
+
+
+def load_channel_hooks() -> dict[int, list[str]]:
+    """Load per-channel shell commands from ~/.config/swigi/config.json."""
+    if not CONFIG_PATH.is_file():
+        return {}
+    try:
+        data = json.loads(CONFIG_PATH.read_text())
+    except (OSError, json.JSONDecodeError) as e:
+        log.warning("Could not read %s: %s", CONFIG_PATH, e)
+        return {}
+
+    hooks: dict[int, list[str]] = {}
+    for channel_str, entry in data.get("on_channel", {}).items():
+        try:
+            channel = int(channel_str)
+        except ValueError:
+            log.warning("Ignoring invalid channel key %r in config", channel_str)
+            continue
+        if isinstance(entry, str):
+            hooks[channel] = [entry]
+        elif isinstance(entry, dict) and entry.get("command"):
+            cmd = entry["command"]
+            hooks[channel] = [cmd] if isinstance(cmd, str) else list(cmd)
+        elif isinstance(entry, list):
+            hooks[channel] = [str(x) for x in entry]
+    return hooks
+
+
+def run_channel_hooks(channel: int, hooks: dict[int, list[str]]) -> None:
+    command = hooks.get(channel)
+    if not command:
+        return
+    log.info("Running channel %d hook: %s", channel, " ".join(command))
+    try:
+        subprocess.Popen(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except OSError as e:
+        log.warning("Channel %d hook failed to start: %s", channel, e)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -463,6 +594,12 @@ def main():
         log.error("Klávesnice nenalezena! Zkontroluj BT připojení.")
         return 1
     log.info("Klávesnice: %s (CHANGE_HOST idx=%d)", kb.name, kb.change_host_idx)
+    if kb.reprog_idx:
+        log.info("           REPROG_CONTROLS idx=%d (MX Keys path)", kb.reprog_idx)
+        try:
+            enable_es_key_reporting(kb.transport, DEVNUMBER_DIRECT, kb.reprog_idx)
+        except (TransportError, OSError) as e:
+            log.warning("Easy-Switch key reporting setup failed: %s", e)
 
     mouse = find_device(DEVICE_TYPE_MOUSE)
     if mouse is None:
@@ -483,9 +620,59 @@ def main():
 
     signal.signal(signal.SIGINT, on_sigint)
 
+    channel_hooks = load_channel_hooks()
+    if channel_hooks:
+        log.info("Channel hooks loaded: %s", ", ".join(str(c) for c in sorted(channel_hooks)))
+
     total_switches = 0
     last_response = time.time()  # watchdog: last time we got any HID++ response
     WATCHDOG_TIMEOUT = 10.0      # force reconnect after this many seconds without response
+
+    def relay_to_mouse(target_host: int) -> None:
+        nonlocal mouse, total_switches
+        channel = target_host + 1  # 1-based for display (Easy-Switch button number)
+        log.info("")
+        log.info("★ Easy-Switch: %s → channel %d", kb.name, channel)
+
+        run_channel_hooks(channel, channel_hooks)
+
+        if mouse.transport._dev is None:
+            log.debug("Mouse transport stale, reconnecting...")
+            new_mouse = find_device(DEVICE_TYPE_MOUSE)
+            if new_mouse:
+                mouse = new_mouse
+            else:
+                log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
+                return
+
+        try:
+            send_change_host(mouse.transport, DEVNUMBER_DIRECT, mouse.change_host_idx, target_host)
+            log.info("★ CHANGE_HOST → %s → channel %d", mouse.name, channel)
+            total_switches += 1
+        except (TransportError, OSError):
+            log.warning("CHANGE_HOST na myš selhal, zkouším reconnect myši...")
+            mouse.close()
+            time.sleep(1.0)
+            new_mouse = find_device(DEVICE_TYPE_MOUSE)
+            if new_mouse:
+                mouse = new_mouse
+                try:
+                    send_change_host(mouse.transport, DEVNUMBER_DIRECT,
+                                     mouse.change_host_idx, target_host)
+                    log.info("★ CHANGE_HOST → %s → channel %d (po reconnectu)",
+                             mouse.name, channel)
+                    total_switches += 1
+                except (TransportError, OSError) as e:
+                    log.warning("CHANGE_HOST retry selhal: %s — myš se přepne příště", e)
+            else:
+                log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
+
+    def setup_keyboard_listening(device: DeviceInfo) -> None:
+        if device.reprog_idx:
+            try:
+                enable_es_key_reporting(device.transport, DEVNUMBER_DIRECT, device.reprog_idx)
+            except (TransportError, OSError) as e:
+                log.warning("Easy-Switch key reporting setup failed: %s", e)
 
     while running:
         # ── Watchdog: force reconnect if no response for too long ──
@@ -498,6 +685,7 @@ def main():
             if kb_new:
                 kb = kb_new
                 log.info("Watchdog reconnect: %s", kb.name)
+                setup_keyboard_listening(kb)
             last_response = time.time()  # reset timer regardless
             continue
 
@@ -526,6 +714,7 @@ def main():
                 continue
             kb = kb_new
             log.info("Klávesnice reconnect: %s", kb.name)
+            setup_keyboard_listening(kb)
             last_response = time.time()  # reset watchdog
 
             # Just close stale mouse transport — reconnect at next event
@@ -550,55 +739,16 @@ def main():
             if rid not in _MSG_LENGTHS or len(raw) != _MSG_LENGTHS[rid]:
                 continue
 
-            feat = raw[2]
-            func = raw[3]
-            sw_id = func & 0x0F
             last_response = time.time()  # watchdog: got valid response
 
-            # CHANGE_HOST notification: feat matches, sw_id == 0 (notification)
-            if feat == kb.change_host_idx and sw_id == 0 and len(raw) > 5:
-                target_host = raw[5]
-                log.info("")
-                log.info("★ Easy-Switch: %s → host %d", kb.name, target_host)
-
-                # Send CHANGE_HOST to mouse — reconnect if transport is stale
-                if mouse.transport._dev is None:
-                    log.debug("Mouse transport stale, reconnecting...")
-                    new_mouse = find_device(DEVICE_TYPE_MOUSE)
-                    if new_mouse:
-                        mouse = new_mouse
-                    else:
-                        log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
-                        break
-
-                try:
-                    send_change_host(mouse.transport, DEVNUMBER_DIRECT,
-                                     mouse.change_host_idx, target_host)
-                    log.info("★ CHANGE_HOST → %s → host %d", mouse.name, target_host)
-                    total_switches += 1
-                except (TransportError, OSError):
-                    log.warning("CHANGE_HOST na myš selhal, zkouším reconnect myši...")
-                    mouse.close()
-                    time.sleep(1.0)  # let BT stack settle
-                    new_mouse = find_device(DEVICE_TYPE_MOUSE)
-                    if new_mouse:
-                        mouse = new_mouse
-                        try:
-                            send_change_host(mouse.transport, DEVNUMBER_DIRECT,
-                                             mouse.change_host_idx, target_host)
-                            log.info("★ CHANGE_HOST → %s → host %d (po reconnectu)",
-                                     mouse.name, target_host)
-                            total_switches += 1
-                        except (TransportError, OSError) as e:
-                            log.warning("CHANGE_HOST retry selhal: %s — myš se přepne příště", e)
-                    else:
-                        log.info("Myš zatím nedostupná — přepne se při dalším Easy-Switch")
-
+            target_host = parse_easy_switch_target(raw, kb)
+            if target_host is not None:
+                relay_to_mouse(target_host)
                 break  # keyboard will disconnect
 
             # Log other notifications
-            if sw_id == 0:
-                log.debug("Notifikace: feat=0x%02X [%s]", feat, raw[:10].hex())
+            if (raw[3] & 0x0F) == 0:
+                log.debug("Notifikace: feat=0x%02X [%s]", raw[2], raw[:10].hex())
 
         time.sleep(0.02)
 

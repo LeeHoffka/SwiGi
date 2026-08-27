@@ -1,0 +1,12 @@
+{
+  "on_channel": {
+    "1": {
+      "description": "Example: switch external monitor to DisplayPort 1 (macOS + m1ddc)",
+      "command": ["/opt/homebrew/bin/m1ddc", "display", "1", "set", "input", "15"]
+    },
+    "2": {
+      "description": "Example: run any command when switching to channel 2",
+      "command": ["/path/to/your/script.sh"]
+    }
+  }
+}
